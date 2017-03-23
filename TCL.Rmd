@@ -1,0 +1,155 @@
+---
+title: "Central Limit Theorem"
+author: "Miguel Conde"
+date: "21 de marzo de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center")
+```
+
+## Populations, parameters, samples and estimators.
+Assume we have a certain *population* that we can model as a random variable $X$. We can characterize this population with the statistical **parameters** $\mu_x$ and $\sigma^2_x$, respectively the *mean* and the *variance* of:
+
+* $P(X)$, the probability distribution of $X$ if it is a discrete variable;
+* Or $f(x)$, the probability density function if $X$ is a continuous one.
+
+The formal definitions of $\mu_x$ and $\sigma^2_x$ are:
+
+$$
+\mu_x = E(X) = <X> =
+      \begin{cases}
+        \int_{-\infty}^{\infty}xf(x)dx \mbox{ if } X \mbox{ is continuous } \\
+        \sum_{-\infty}^{\infty}x_iP(x_i) \mbox{ if } X \mbox{ is discrete }
+      \end{cases}
+$$
+
+$$
+\sigma_x^2  = E[(X-\mu_x)^2] = E(X^2) - 2E(X)\mu_x + \mu_x^2 = E(X^2) - 2\mu_x^2 + \mu_x^2 = E(X^2) - \mu_x^2
+$$
+
+
+Of course, if we extract, let's say $n$ sample elements from the populations modelled as $X$, the sample will allow us to estimate $\mu_x$ and $\sigma^2_x$. In fact, if the sample is $\{x_i\}$:
+
+$$
+\bar{X} = \frac{1}{n}\sum_{i=1}^nx_i
+$$
+is the estimator for the the parameter "mean"; and:
+
+$$
+s^2_x = \frac{1}{n-1}\sum_{i=1}^{n}(x_i - \bar{X})
+$$
+is the estimator for the parameter "variance".
+
+Till now we haven't referred to a concrete probability distribution, $P(X)$, or probability density function, $f(x)$. All we've said above is totally generic.
+
+But let's work an example now. Let's asume that out population follows a continuous uniform probability distribution from -1 to 1. Such a population will have $\mu_x=0$ and $\sigma_x^2 = `r (1+1)^2/12`$. If we extract a $n$ elements sample:
+
+```{r}
+set.seed(987)
+n <- 40 # Sample Size
+unif_sample <- runif(n, -1, 1)
+head(unif_sample, 20)
+```
+
+We can estimate $\mu_x$ and $\sigma_x^2$:
+
+```{r}
+est1_mean <- sum(unif_sample) / length(unif_sample)
+est1_mean
+
+est1_var <- sum((unif_sample - est1_mean)^2) / (length(unif_sample) - 1)
+est1_var
+```
+
+Nevertheless, in R is easiest to use the custom functions:
+
+```{r}
+est_mean <- mean(unif_sample)
+est_mean
+est_var <- var(unif_sample)
+est_var
+```
+
+# The TCL
+Let's repeat the above procedure, let's say, $N = 30$ times.
+
+```{r}
+N <- 1000 # Number of samples
+set.seed(456)
+
+list_of_unif_samples <- lapply(1:N, function(x) {
+  runif(n, -1, 1)
+})
+
+list_of_est_means <- sapply(list_of_unif_samples, mean)
+```
+
+Each element in `list_of_est_means` is, as we know, an estimator of the parameter $\mu_x$ that describes the mean of $X$; AND - here comes the interesting part - what the TCL says is that:
+
+* `list_of_est_means` is a sample of a NEW random variable, $\bar{X}$, i. e., THE MEAN OF $X$.
+* $\bar{X}$ *follows a normal distribution* with:
+    + $\mu_\bar{x} = \mu_x$
+    + $\sigma_{\bar{x}} = \frac{\sigma_x}{\sqrt{n}}$ (aka *standard error*)
+* So, we can use $\bar{X}$ to estimate the parameters of $X$. 
+
+```{r}
+tcl_mean_est <- mean(list_of_est_means)
+tcl_mean_est
+
+tcl_var_estimate <- var(list_of_est_means) * n
+tcl_var_estimate
+```
+
+With a confidence level of $100 \times (1-\alpha) = 95 \%$, a good estimate of the confidence interval is:
+
+```{r}
+alpha <- 0.05
+z_coef <- qnorm(1 - alpha/2)
+tcl_se_estimate <- sd(list_of_est_means)
+tcl_mean_est + c(-1, 1) * z_coef * tcl_se_estimate 
+```
+
+```{r}
+t_test <- t.test(list_of_est_means)
+t_test$estimate + (t_test$conf.int - t_test$estimate)*sqrt(N)
+```
+
+
+As $n$ grows we get much better estimates (less error, as standard error is smaller).
+
+### TCL Visualization
+Let's visualize the distribution of the sample of $\bar{X}$:
+
+```{r}
+hist(list_of_est_means, freq = F, 
+     ylim = c(0, max(hist(list_of_est_means, plot = F)$density,
+                     density(list_of_est_means)$y)),
+     xlab = expression(bar(X)),
+     main = (expression(paste(bar(X), " Distribution"))))
+lines(density(list_of_est_means))
+```
+
+As N grows, the distribution of $\bar{X}$ goes and goes normal:
+
+```{r}
+getListOfUnifSamples <- function(N = 1000, n = 30) {
+  list_of_unif_samples <- lapply(1:N, function(x) {
+    runif(n, -1, 1)
+})
+
+sapply(list_of_unif_samples, mean)
+}
+
+set.seed(456)
+lists <- sapply(c(10, 100, 1000, 10000), getListOfUnifSamples)
+
+plot(density(lists[[1]]))
+lines(density(lists[[2]]), col = "red")
+lines(density(lists[[3]]), col = "green")
+lines(density(lists[[4]]), col = "blue")
+abline(v = 0, lty = 2)
+```
+

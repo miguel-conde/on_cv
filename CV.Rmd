@@ -1,0 +1,191 @@
+---
+title: "Explaining Cross Validation"
+author: "Miguel Conde"
+date: "22 de marzo de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center")
+```
+
+We're gonna explore cross validation using a regression example: the goal is to estimate the average medical care expenses analysing patient data.
+
+```{r}
+www <- "https://raw.githubusercontent.com/stedy/Machine-Learning-with-R-datasets/master/insurance.csv"
+
+insurance_data <-  read.csv(www, stringsAsFactors = TRUE)
+
+str(insurance_data)
+```
+
+As we're interested in understanding cross validation, we're gonna skip all that preliminary stuff as exploring, visualizing and preparing the data and will directly undertake the construction of the model.
+
+
+## Basic validation: *hold-out* strategy
+First, we obtain a training dataset and a validation dataset. The validation dataset will allow us to estimate the performace of the model on data not used to construct it.
+
+Let's start. First, divide data into a training and a validation dataset, each with, respectively, 90% and 10% randomly extracted data from `insurance_data`:
+```{r}
+library(caret)
+
+set.seed(890)
+idxTrain <- createDataPartition(insurance_data$charges, p = 0.9, list = FALSE)
+
+train_data <- insurance_data[ idxTrain, ]
+valid_data <- insurance_data[-idxTrain, ]
+```
+
+Now *all* data in `insurance_data` is contained *in one* of `train_data` or `valid_data` *but not in both*.
+
+Let's build a regression random forest:
+```{r}
+library(randomForest)
+
+rfModel <- randomForest(charges ~ ., data = train_data)
+```
+
+To estimate its performance we can measure the prediction errors (residuals) on the validation set and average them.
+
+```{r}
+pred <- predict(rfModel, valid_data)
+resid <- pred - valid_data$charges
+
+avg_error <- mean(resid)
+avg_error
+```
+
+Using the Central Limit Thorem, we can estimate the mean and the variance of the distribution governing the residuals:
+
+```{r}
+est_mean_residuals <- avg_error
+est_var_residuals <- var(resid)
+```
+
+Which we can use to estimate a 95% `avg_error` confidence interval:
+```{r}
+n <- length(valid_data$charges) # Sample length
+
+alpha <- 0.05
+z_coef <- qnorm(1 - alpha/2)
+tcl_se_estimate <- sqrt(est_var_residuals / n) # Standard error
+est_mean_residuals + c(-1, 1) * z_coef * tcl_se_estimate
+```
+
+## Refining the validation strategy using the Central Limit Theorem (CLT): *Cross Validation*
+But we can take more advantage of the CLT. What if we repeat this process, say 10 times?
+
+We'd need 10 train / validation sets pairs:
+```{r}
+n_folds <- 10
+
+set.seed(890)
+folds <- createFolds(insurance_data$charges, k = n_folds)
+
+head(folds)
+```
+
+In each iteration we will use 9 folds to build the model an the other fold to validate it:
+
+```{r}
+
+avg_errors <- c()
+
+for (i in 1:n_folds) {
+  valid_data <- insurance_data[ folds[[i]], ]
+  train_data <- insurance_data[-folds[[i]], ]
+  
+  rfModel <- randomForest(charges ~ ., data = train_data)
+  
+  pred <- predict(rfModel, valid_data)
+  resid <- pred - valid_data$charges
+  
+  avg_error <- mean(resid)
+  avg_errors <- c(avg_errors, avg_error)
+}
+```
+
+```{r}
+avg_errors
+```
+
+```{r}
+mean(avg_errors)
+```
+
+```{r}
+sd(avg_errors)
+```
+
+And, following the TCL:
+
+```{r}
+n <- length(valid_data$charges) # Sample length
+
+alpha <- 0.05
+z_coef <- qnorm(1 - alpha/2)
+tcl_mn_estimate <- mean(avg_errors)
+tcl_se_estimate <- sd(avg_errors) / sqrt(n) # Standard error
+
+tcl_mn_estimate + c(-1, 1) * z_coef * tcl_se_estimate
+```
+
+## Cross validation with `caret`
+
+We can automate this process using `caret`:
+
+```{r}
+myResid <- function(data, lev = NULL, model = NULL) {
+  out <- mean(data[, "pred"] - data[, "obs"])
+  names(out) <- "RES"
+  out
+}
+
+fitControl <- trainControl(method = "cv",
+                           number = n_folds,
+                           summaryFunction = myResid)
+
+set.seed(890)
+
+rfFit <- train(charges ~ ., data = insurance_data,
+               method     = "rf", 
+               trControl  = fitControl,
+               tuneLength = 1, 
+               metric = "RES")
+
+```
+
+```{r}
+rfFit$results
+```
+
+```{r}
+rfFit$resample
+```
+
+```{r}
+mean(rfFit$resample$RES)         # Compare to tcl_mn_estimate
+```
+
+```{r}
+sd(rfFit$resample$RES) 
+```
+
+```{r}
+sd(rfFit$resample$RES) / sqrt(n) # Compare to tcl_se_estimate
+```
+
+And the confidence interval is now:
+```{r}
+mean(rfFit$resample$RES) + c(-1, 1)*z_coef*sd(rfFit$resample$RES)/sqrt(n)
+```
+
+Clearly of the same magnitude of that obtained before.
+
+## Important remarks
+
+* The sample size corresponds with the length of each folder. In our case, $n = `r n`$. As CLT states, the greater `n`, the narrower the confidence interval.
+* So, there is a trade-off between the number of folders (i.e., the number $N$ of samples) and the size of each folder (i.e., the sample size, $n$). 
+    + If we want a big $n$ to get a narrow confidence interval, the sample distribution won't be able to look like normal (because the number of folders / samples will be low)
+    + On the contrary, if we work with too much folders / samples, the sample distribution may look more normal, but the confidence interval will be broader as the sample size $n$ will be lower now.  
